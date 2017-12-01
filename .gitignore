@@ -1,0 +1,9 @@
+iwlist
+iwconfig
+ifrename
+iwevent
+iwgetid
+iwpriv
+iwspy
+*.so*
+*.o
