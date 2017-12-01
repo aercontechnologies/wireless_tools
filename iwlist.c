@@ -444,12 +444,179 @@ iw_print_gen_ie(unsigned char *	buffer,
  * do the complete job...
  */
 
-/*------------------------------------------------------------------*/
-/*
- * Print one element from the scanning results
- */
 static inline void
-print_scanning_token(struct stream_descr *	stream,	/* Stream of events */
+print_scanning_token_machinereadable(struct stream_descr *  stream, /* Stream of events */
+         struct iw_event *    event,  /* Extracted token */
+         struct iwscan_state *  state,
+         struct iw_range *  iw_range, /* Range info */
+         int    has_range)
+{
+  char    buffer[128];  /* Temporary buffer */
+
+  /* Now, let's decode the event */
+  switch(event->cmd)
+    {
+    case SIOCGIWAP:
+      printf("cell=%d\naddress=%s\n", state->ap_num, iw_saether_ntop(&event->u.ap_addr, buffer));
+      state->ap_num++;
+      break;
+    case SIOCGIWNWID:
+      if(event->u.nwid.disabled)
+        printf("nwid=off/any\n");
+      else
+        printf("nwid=%X\n", event->u.nwid.value);
+      break;
+    case SIOCGIWFREQ:
+    {
+      double    freq;     /* Frequency/channel */
+      int   channel = -1;   /* Converted to channel */
+      freq = iw_freq2float(&(event->u.freq));
+      /* Convert to channel if possible */
+      if(has_range)
+        channel = iw_freq_to_channel(freq, iw_range);
+
+      printf("channel=%d\nfreq=%f\n", channel, freq);
+      
+      /*iw_print_freq(buffer, sizeof(buffer),
+              freq, channel, event->u.freq.flags);
+      printf("                    %s\n", buffer);*/
+    }
+    break;
+    
+    case SIOCGIWMODE:
+      /* Note : event->u.mode is unsigned, no need to check <= 0 */
+      if(event->u.mode >= IW_NUM_OPER_MODE)
+        event->u.mode = IW_NUM_OPER_MODE;
+      printf("mode=%s\n",
+       iw_operation_mode[event->u.mode]);
+      break;
+    case SIOCGIWNAME:
+      printf("protocol=%-1.16s\n", event->u.name);
+      break;
+    case SIOCGIWESSID:
+      {
+  char essid[IW_ESSID_MAX_SIZE+1];
+  memset(essid, '\0', sizeof(essid));
+  if((event->u.essid.pointer) && (event->u.essid.length))
+    memcpy(essid, event->u.essid.pointer, event->u.essid.length);
+  if(event->u.essid.flags)
+    {
+      /* Does it have an ESSID index ? */
+      if((event->u.essid.flags & IW_ENCODE_INDEX) > 1)
+        printf("essid=\"%s\" [%d]\n", essid,
+         (event->u.essid.flags & IW_ENCODE_INDEX));
+      else
+        printf("essid=\"%s\"\n", essid);
+    }
+  else
+    printf("essid=off/any/hidden\n");
+      }
+      break;
+    case SIOCGIWENCODE:
+      {
+  unsigned char key[IW_ENCODING_TOKEN_MAX];
+  if(event->u.data.pointer)
+    memcpy(key, event->u.data.pointer, event->u.data.length);
+  else
+    event->u.data.flags |= IW_ENCODE_NOKEY;
+  printf("encryption_key=");
+  if(event->u.data.flags & IW_ENCODE_DISABLED)
+    printf("off\n");
+  else
+    {
+      /* Display the key */
+      iw_print_key(buffer, sizeof(buffer), key, event->u.data.length,
+       event->u.data.flags);
+      printf("%s", buffer);
+
+      /* Other info... */
+      if((event->u.data.flags & IW_ENCODE_INDEX) > 1)
+        printf(" [%d]", event->u.data.flags & IW_ENCODE_INDEX);
+      if(event->u.data.flags & IW_ENCODE_RESTRICTED)
+        printf(" security-mode=restricted");
+      if(event->u.data.flags & IW_ENCODE_OPEN)
+        printf(" security-mode=open");
+      printf("\n");
+    }
+      }
+      break;
+    case SIOCGIWRATE:
+      if(state->val_index == 0)
+        printf("bit-rates=");
+      else
+        printf("; ");
+      iw_print_bitrate(buffer, sizeof(buffer), event->u.bitrate.value);
+      printf("%s", buffer);
+      /* Check for termination */
+      if(stream->value == NULL)
+  {
+    printf("\n");
+    state->val_index = 0;
+  }
+      else
+  state->val_index++;
+      break;
+    case SIOCGIWMODUL:
+      {
+  unsigned int  modul = event->u.param.value;
+  int   i;
+  int   n = 0;
+  printf("                    Modulations :");
+  for(i = 0; i < IW_SIZE_MODUL_LIST; i++)
+    {
+      if((modul & iw_modul_list[i].mask) == iw_modul_list[i].mask)
+        {
+    if((n++ % 8) == 7)
+      printf("\n                        ");
+    else
+      printf(" ; ");
+    printf("%s", iw_modul_list[i].cmd);
+        }
+    }
+  printf("\n");
+      }
+      break;
+    case IWEVQUAL:
+    {
+      double  dblevel = 0.0;
+      iwqual * qual = &event->u.qual;
+
+      if(qual->updated & IW_QUAL_RCPI) {
+        if(!(qual->updated & IW_QUAL_LEVEL_INVALID)) {
+          dblevel = (qual->level / 2.0) - 110.0;
+        }
+      } 
+
+      if(qual->updated & IW_QUAL_DBM) {
+        if(!(qual->updated & IW_QUAL_LEVEL_INVALID)) {
+          dblevel = qual->level;
+
+          if(qual->level >= 64)
+            dblevel -= 0x100;
+        }
+      }
+
+      printf("quality=%d\nmax_quality=%d\nsignal=%g\n", qual->qual, iw_range->max_qual.qual, dblevel);
+    }
+    break;
+    
+    case IWEVCUSTOM:
+      {
+  char custom[IW_CUSTOM_MAX+1];
+  if((event->u.data.pointer) && (event->u.data.length))
+    memcpy(custom, event->u.data.pointer, event->u.data.length);
+  custom[event->u.data.length] = '\0';
+  printf("extra=%s\n", custom);
+      }
+      break;
+    default:
+      printf("ignore=(Unknown Wireless Token 0x%04X)\n",
+       event->cmd);
+   }  /* switch(event->cmd) */
+}
+
+static inline void
+print_scanning_token_humanreadable(struct stream_descr *	stream,	/* Stream of events */
 		     struct iw_event *		event,	/* Extracted token */
 		     struct iwscan_state *	state,
 		     struct iw_range *	iw_range,	/* Range info */
@@ -608,23 +775,43 @@ print_scanning_token(struct stream_descr *	stream,	/* Stream of events */
 
 /*------------------------------------------------------------------*/
 /*
+ * Print one element from the scanning results
+ */
+static inline void
+print_scanning_token(struct stream_descr *  stream, /* Stream of events */
+         struct iw_event *    event,  /* Extracted token */
+         struct iwscan_state *  state,
+         struct iw_range *  iw_range, /* Range info */
+         int    has_range,
+         int   machine_readable)
+{
+  if(machine_readable) {
+    print_scanning_token_machinereadable(stream, event, state, iw_range, has_range);
+  } else {
+    print_scanning_token_humanreadable(stream, event, state, iw_range, has_range);
+  }
+}
+
+/*------------------------------------------------------------------*/
+/*
  * Perform a scanning on one device
  */
 static int
-print_scanning_info(int		skfd,
-		    char *	ifname,
-		    char *	args[],		/* Command line args */
-		    int		count)		/* Args count */
+print_scanning_info_internal(int    skfd,
+        char *  ifname,
+        char *  args[],   /* Command line args */
+        int   count, /* Args count */
+        int machine_readable)  /* machine readable output, or no? */
 {
-  struct iwreq		wrq;
-  struct iw_scan_req    scanopt;		/* Options for 'set' */
-  int			scanflags = 0;		/* Flags for scan */
-  unsigned char *	buffer = NULL;		/* Results */
-  int			buflen = IW_SCAN_MAX_DATA; /* Min for compat WE<17 */
-  struct iw_range	range;
-  int			has_range;
-  struct timeval	tv;				/* Select timeout */
-  int			timeout = 15000000;		/* 15s */
+  struct iwreq    wrq;
+  struct iw_scan_req    scanopt;    /* Options for 'set' */
+  int     scanflags = 0;    /* Flags for scan */
+  unsigned char * buffer = NULL;    /* Results */
+  int     buflen = IW_SCAN_MAX_DATA; /* Min for compat WE<17 */
+  struct iw_range range;
+  int     has_range;
+  struct timeval  tv;       /* Select timeout */
+  int     timeout = 15000000;   /* 15s */
 
   /* Avoid "Unused parameter" warning */
   args = args; count = count;
@@ -635,7 +822,7 @@ print_scanning_info(int		skfd,
       fprintf(stderr, "*** Please report to jt@hpl.hp.com your platform details\n");
       fprintf(stderr, "*** and the following line :\n");
       fprintf(stderr, "*** IW_EV_LCP_PK2_LEN = %zu ; IW_EV_POINT_PK2_LEN = %zu\n\n",
-	      IW_EV_LCP_PK2_LEN, IW_EV_POINT_PK2_LEN);
+        IW_EV_LCP_PK2_LEN, IW_EV_POINT_PK2_LEN);
     }
 
   /* Get range stuff */
@@ -644,8 +831,12 @@ print_scanning_info(int		skfd,
   /* Check if the interface could support scanning. */
   if((!has_range) || (range.we_version_compiled < 14))
     {
-      fprintf(stderr, "%-8.16s  Interface doesn't support scanning.\n\n",
-	      ifname);
+      if(machine_readable) {
+        fprintf(stderr, "iface=%s\nno-scans-on-interface\nerrno=%d\n", ifname, errno);
+      } else {
+        fprintf(stderr, "%-8.16s  Interface doesn't support scanning : %s\n\n",
+          ifname, strerror(errno));
+      }
       return(-1);
     }
 
@@ -668,40 +859,40 @@ print_scanning_info(int		skfd,
        * Check for Active Scan (scan with specific essid)
        */
       if(!strncmp(args[0], "essid", 5))
-	{
-	  if(count < 1)
-	    {
-	      fprintf(stderr, "Too few arguments for scanning option [%s]\n",
-		      args[0]);
-	      return(-1);
-	    }
-	  args++;
-	  count--;
+  {
+    if(count < 1)
+      {
+        fprintf(stderr, "Too few arguments for scanning option [%s]\n",
+          args[0]);
+        return(-1);
+      }
+    args++;
+    count--;
 
-	  /* Store the ESSID in the scan options */
-	  scanopt.essid_len = strlen(args[0]);
-	  memcpy(scanopt.essid, args[0], scanopt.essid_len);
-	  /* Initialise BSSID as needed */
-	  if(scanopt.bssid.sa_family == 0)
-	    {
-	      scanopt.bssid.sa_family = ARPHRD_ETHER;
-	      memset(scanopt.bssid.sa_data, 0xff, ETH_ALEN);
-	    }
-	  /* Scan only this ESSID */
-	  scanflags |= IW_SCAN_THIS_ESSID;
-	}
+    /* Store the ESSID in the scan options */
+    scanopt.essid_len = strlen(args[0]);
+    memcpy(scanopt.essid, args[0], scanopt.essid_len);
+    /* Initialise BSSID as needed */
+    if(scanopt.bssid.sa_family == 0)
+      {
+        scanopt.bssid.sa_family = ARPHRD_ETHER;
+        memset(scanopt.bssid.sa_data, 0xff, ETH_ALEN);
+      }
+    /* Scan only this ESSID */
+    scanflags |= IW_SCAN_THIS_ESSID;
+  }
       else
-	/* Check for last scan result (do not trigger scan) */
-	if(!strncmp(args[0], "last", 4))
-	  {
-	    /* Hack */
-	    scanflags |= IW_SCAN_HACK;
-	  }
-	else
-	  {
-	    fprintf(stderr, "Invalid scanning option [%s]\n", args[0]);
-	    return(-1);
-	  }
+  /* Check for last scan result (do not trigger scan) */
+  if(!strncmp(args[0], "last", 4))
+    {
+      /* Hack */
+      scanflags |= IW_SCAN_HACK;
+    }
+  else
+    {
+      fprintf(stderr, "Invalid scanning option [%s]\n", args[0]);
+      return(-1);
+    }
 
       /* Next arg */
       args++;
@@ -731,31 +922,35 @@ print_scanning_info(int		skfd,
     {
       /* Initiate Scanning */
       if(iw_set_ext(skfd, ifname, SIOCSIWSCAN, &wrq) < 0)
-	{
-	  if((errno != EPERM) || (scanflags != 0))
-	    {
-	      fprintf(stderr, "%-8.16s  Interface doesn't support scanning : %s\n\n",
-		      ifname, strerror(errno));
-	      return(-1);
-	    }
-	  /* If we don't have the permission to initiate the scan, we may
-	   * still have permission to read left-over results.
-	   * But, don't wait !!! */
+  {
+    if((errno != EPERM) || (scanflags != 0))
+      {
+        if(machine_readable) {
+          fprintf(stderr, "iface=%s\nno-scans-on-interface\nerrno=%d\n", ifname, errno);
+        } else {
+          fprintf(stderr, "%-8.16s  Interface doesn't support scanning : %s\n\n",
+            ifname, strerror(errno));
+        }
+        return(-1);
+      }
+    /* If we don't have the permission to initiate the scan, we may
+     * still have permission to read left-over results.
+     * But, don't wait !!! */
 #if 0
-	  /* Not cool, it display for non wireless interfaces... */
-	  fprintf(stderr, "%-8.16s  (Could not trigger scanning, just reading left-over results)\n", ifname);
+    /* Not cool, it display for non wireless interfaces... */
+    fprintf(stderr, "%-8.16s  (Could not trigger scanning, just reading left-over results)\n", ifname);
 #endif
-	  tv.tv_usec = 0;
-	}
+    tv.tv_usec = 0;
+  }
     }
   timeout -= tv.tv_usec;
 
   /* Forever */
   while(1)
     {
-      fd_set		rfds;		/* File descriptors for select */
-      int		last_fd;	/* Last fd */
-      int		ret;
+      fd_set    rfds;   /* File descriptors for select */
+      int   last_fd;  /* Last fd */
+      int   ret;
 
       /* Guess what ? We must re-generate rfds each time */
       FD_ZERO(&rfds);
@@ -768,78 +963,78 @@ print_scanning_info(int		skfd,
 
       /* Check if there was an error */
       if(ret < 0)
-	{
-	  if(errno == EAGAIN || errno == EINTR)
-	    continue;
-	  fprintf(stderr, "Unhandled signal - exiting...\n");
-	  return(-1);
-	}
+  {
+    if(errno == EAGAIN || errno == EINTR)
+      continue;
+    fprintf(stderr, "Unhandled signal - exiting...\n");
+    return(-1);
+  }
 
       /* Check if there was a timeout */
       if(ret == 0)
-	{
-	  unsigned char *	newbuf;
+  {
+    unsigned char * newbuf;
 
-	realloc:
-	  /* (Re)allocate the buffer - realloc(NULL, len) == malloc(len) */
-	  newbuf = realloc(buffer, buflen);
-	  if(newbuf == NULL)
-	    {
-	      if(buffer)
-		free(buffer);
-	      fprintf(stderr, "%s: Allocation failed\n", __FUNCTION__);
-	      return(-1);
-	    }
-	  buffer = newbuf;
+  realloc:
+    /* (Re)allocate the buffer - realloc(NULL, len) == malloc(len) */
+    newbuf = realloc(buffer, buflen);
+    if(newbuf == NULL)
+      {
+        if(buffer)
+    free(buffer);
+        fprintf(stderr, "%s: Allocation failed\n", __FUNCTION__);
+        return(-1);
+      }
+    buffer = newbuf;
 
-	  /* Try to read the results */
-	  wrq.u.data.pointer = buffer;
-	  wrq.u.data.flags = 0;
-	  wrq.u.data.length = buflen;
-	  if(iw_get_ext(skfd, ifname, SIOCGIWSCAN, &wrq) < 0)
-	    {
-	      /* Check if buffer was too small (WE-17 only) */
-	      if((errno == E2BIG) && (range.we_version_compiled > 16))
-		{
-		  /* Some driver may return very large scan results, either
-		   * because there are many cells, or because they have many
-		   * large elements in cells (like IWEVCUSTOM). Most will
-		   * only need the regular sized buffer. We now use a dynamic
-		   * allocation of the buffer to satisfy everybody. Of course,
-		   * as we don't know in advance the size of the array, we try
-		   * various increasing sizes. Jean II */
+    /* Try to read the results */
+    wrq.u.data.pointer = buffer;
+    wrq.u.data.flags = 0;
+    wrq.u.data.length = buflen;
+    if(iw_get_ext(skfd, ifname, SIOCGIWSCAN, &wrq) < 0)
+      {
+        /* Check if buffer was too small (WE-17 only) */
+        if((errno == E2BIG) && (range.we_version_compiled > 16))
+    {
+      /* Some driver may return very large scan results, either
+       * because there are many cells, or because they have many
+       * large elements in cells (like IWEVCUSTOM). Most will
+       * only need the regular sized buffer. We now use a dynamic
+       * allocation of the buffer to satisfy everybody. Of course,
+       * as we don't know in advance the size of the array, we try
+       * various increasing sizes. Jean II */
 
-		  /* Check if the driver gave us any hints. */
-		  if(wrq.u.data.length > buflen)
-		    buflen = wrq.u.data.length;
-		  else
-		    buflen *= 2;
+      /* Check if the driver gave us any hints. */
+      if(wrq.u.data.length > buflen)
+        buflen = wrq.u.data.length;
+      else
+        buflen *= 2;
 
-		  /* Try again */
-		  goto realloc;
-		}
+      /* Try again */
+      goto realloc;
+    }
 
-	      /* Check if results not available yet */
-	      if(errno == EAGAIN)
-		{
-		  /* Restart timer for only 100ms*/
-		  tv.tv_sec = 0;
-		  tv.tv_usec = 100000;
-		  timeout -= tv.tv_usec;
-		  if(timeout > 0)
-		    continue;	/* Try again later */
-		}
+        /* Check if results not available yet */
+        if(errno == EAGAIN)
+    {
+      /* Restart timer for only 100ms*/
+      tv.tv_sec = 0;
+      tv.tv_usec = 100000;
+      timeout -= tv.tv_usec;
+      if(timeout > 0)
+        continue; /* Try again later */
+    }
 
-	      /* Bad error */
-	      free(buffer);
-	      fprintf(stderr, "%-8.16s  Failed to read scan data : %s\n\n",
-		      ifname, strerror(errno));
-	      return(-2);
-	    }
-	  else
-	    /* We have the results, go to process them */
-	    break;
-	}
+        /* Bad error */
+        free(buffer);
+        fprintf(stderr, "%-8.16s  Failed to read scan data : %s\n\n",
+          ifname, strerror(errno));
+        return(-2);
+      }
+    else
+      /* We have the results, go to process them */
+      break;
+  }
 
       /* In here, check if event and event type
        * if scan event, read results. All errors bad & no reset timeout */
@@ -847,39 +1042,77 @@ print_scanning_info(int		skfd,
 
   if(wrq.u.data.length)
     {
-      struct iw_event		iwe;
-      struct stream_descr	stream;
-      struct iwscan_state	state = { .ap_num = 1, .val_index = 0 };
-      int			ret;
+      struct iw_event   iwe;
+      struct stream_descr stream;
+      struct iwscan_state state = { .ap_num = 1, .val_index = 0 };
+      int     ret;
       
 #ifdef DEBUG
       /* Debugging code. In theory useless, because it's debugged ;-) */
-      int	i;
+      int i;
       printf("Scan result %d [%02X", wrq.u.data.length, buffer[0]);
       for(i = 1; i < wrq.u.data.length; i++)
-	printf(":%02X", buffer[i]);
+  printf(":%02X", buffer[i]);
       printf("]\n");
 #endif
-      printf("%-8.16s  Scan completed :\n", ifname);
+      if(machine_readable) {
+        printf("iface=%s\nscan-completed\n");
+      } else {
+        printf("%-8.16s  Scan completed :\n", ifname);
+      }
+
       iw_init_event_stream(&stream, (char *) buffer, wrq.u.data.length);
+
+      if(machine_readable) {
+        printf("start-network-definition\n");
+      }
+
       do
-	{
-	  /* Extract an event and print it */
-	  ret = iw_extract_event_stream(&stream, &iwe,
-					range.we_version_compiled);
-	  if(ret > 0)
-	    print_scanning_token(&stream, &iwe, &state,
-				 &range, has_range);
-	}
+      {
+        /* Extract an event and print it */
+        ret = iw_extract_event_stream(&stream, &iwe,
+              range.we_version_compiled);
+        if(ret > 0)
+          print_scanning_token(&stream, &iwe, &state,
+             &range, has_range, machine_readable);
+      }
       while(ret > 0);
+
+      if(machine_readable) {
+        printf("end-network-definition\n");
+      }
+
       printf("\n");
     }
   else
-    printf("%-8.16s  No scan results\n\n", ifname);
+    if(machine_readable) {
+      printf("iface=%s\nno-scan-results\n", ifname); 
+    } else {
+      printf("%-8.16s  No scan results\n\n", ifname);
+    }
 
   free(buffer);
   return(0);
 }
+
+static int
+print_scanning_info_machinereadable(int skfd,
+        char * ifname,
+        char * args[],    /* Command line args */
+        int count) /* Args count */
+{
+  print_scanning_info_internal(skfd, ifname, args, count, 1);
+}
+
+static int
+print_scanning_info(int skfd,
+        char * ifname,
+        char * args[],    /* Command line args */
+        int count) /* Args count */
+{
+  print_scanning_info_internal(skfd, ifname, args, count, 0);
+}
+
 
 /*********************** FREQUENCIES/CHANNELS ***********************/
 
@@ -2053,6 +2286,7 @@ typedef struct iwlist_entry {
 
 static const struct iwlist_entry iwlist_cmds[] = {
   { "scanning",		print_scanning_info,	-1, "[essid NNN] [last]" },
+  { "mr_scanning",    print_scanning_info_machinereadable, -1, "[essid NNN] [last]"},
   { "frequency",	print_freq_info,	0, NULL },
   { "channel",		print_freq_info,	0, NULL },
   { "bitrate",		print_bitrate_info,	0, NULL },
@@ -2092,11 +2326,11 @@ find_command(const char *	cmd)
     {
       /* No match -> next one */
       if(strncasecmp(iwlist_cmds[i].cmd, cmd, len) != 0)
-	continue;
+	     continue;
 
       /* Exact match -> perfect */
       if(len == strlen(iwlist_cmds[i].cmd))
-	return &iwlist_cmds[i];
+	     return &iwlist_cmds[i];
 
       /* Partial match */
       if(found == NULL)

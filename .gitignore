@@ -7,3 +7,4 @@ iwpriv
 iwspy
 *.so*
 *.o
+*.a
