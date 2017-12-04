@@ -8,3 +8,4 @@ iwspy
 *.so*
 *.o
 *.a
+*.d

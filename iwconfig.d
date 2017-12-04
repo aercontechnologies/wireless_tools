@@ -1,1 +1,1 @@
-iwconfig.o: iwconfig.c iwlib.h wireless.h
+iwconfig.o: iwconfig.c iwlib-private.h iwlib.h wireless.h

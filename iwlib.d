@@ -1,1 +1,1 @@
-iwlib.so: iwlib.c iwlib.h wireless.h
+iwlib.so: iwlib.c iwlib-private.h iwlib.h wireless.h

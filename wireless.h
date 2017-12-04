@@ -1,10 +1,16 @@
 /*
  * This file define a set of standard wireless extensions
  *
- * Version :	21	14.3.06
+ * Version :	22	16.3.07
  *
  * Authors :	Jean Tourrilhes - HPL - <jt@hpl.hp.com>
- * Copyright (c) 1997-2005 Jean Tourrilhes, All Rights Reserved.
+ * Copyright (c) 1997-2007 Jean Tourrilhes, All Rights Reserved.
+ *
+ * This file, and only this file, is licensed under the terms of the LGPL.
+ * You can redistribute it and/or modify it under the terms of the GNU
+ * Lesser General Public License as published by the Free Software
+ * Foundation; either version 2.1 of the License, or (at your option)
+ * any later version.
  */
 
 #ifndef _LINUX_WIRELESS_H
@@ -85,7 +91,7 @@
  * (there is some stuff that will be added in the future...)
  * I just plan to increment with each new version.
  */
-#define WIRELESS_EXT	21
+#define WIRELESS_EXT	22
 
 /*
  * Changes :
@@ -219,6 +225,12 @@
  *	- Add IW_POWER_SAVING power type
  *	- Power/Retry relative values no longer * 100000
  *	- Add bitrate flags for unicast/broadcast
+ *	- Add explicit flag to tell stats are in 802.11k RCPI : IW_QUAL_RCPI
+ *
+ * V21 to V22
+ * ----------
+ *	- Prevent leaking of kernel space in stream on 64 bits.
+ *	- Scan capabilities in struct iw_range (Dan Williams)
  */
 
 /**************************** CONSTANTS ****************************/
@@ -335,7 +347,7 @@
  * separate range because of collisions with other tools such as
  * 'mii-tool'.
  * We now have 32 commands, so a bit more space ;-).
- * Also, all 'odd' commands are only usable by root and don't return the
+ * Also, all 'even' commands are only usable by root and don't return the
  * content of ifr/iwr to user (but you are not obliged to use the set/get
  * convention, just use every other two command). More details in iwpriv.c.
  * And I repeat : you are not forced to use them with iwpriv, but you
@@ -349,7 +361,7 @@
 #define SIOCIWLAST	SIOCIWLASTPRIV		/* 0x8BFF */
 #define IW_IOCTL_IDX(cmd)	((cmd) - SIOCIWFIRST)
 
-/* Even : get (world access), odd : set (root access) */
+/* Odd : get (world access), Even : set (root access) */
 #define IW_IS_SET(cmd)	(!((cmd) & 0x1))
 #define IW_IS_GET(cmd)	((cmd) & 0x1)
 
@@ -539,6 +551,16 @@
 /* Maximum size of returned data */
 #define IW_SCAN_MAX_DATA	4096	/* In bytes */
 
+/* Scan capability flags - in (struct iw_range *)->scan_capa */
+#define IW_SCAN_CAPA_NONE		0x00
+#define IW_SCAN_CAPA_ESSID		0x01
+#define IW_SCAN_CAPA_BSSID		0x02
+#define IW_SCAN_CAPA_CHANNEL		0x04
+#define IW_SCAN_CAPA_MODE		0x08
+#define IW_SCAN_CAPA_RATE		0x10
+#define IW_SCAN_CAPA_TYPE		0x20
+#define IW_SCAN_CAPA_TIME		0x40
+
 /* Max number of char in custom event - use multiple of them if needed */
 #define IW_CUSTOM_MAX		256	/* In bytes */
 
@@ -548,6 +570,8 @@
 /* MLME requests (SIOCSIWMLME / struct iw_mlme) */
 #define IW_MLME_DEAUTH		0
 #define IW_MLME_DISASSOC	1
+#define IW_MLME_AUTH		2
+#define IW_MLME_ASSOC		3
 
 /* SIOCSIWAUTH/SIOCGIWAUTH struct iw_param flags */
 #define IW_AUTH_INDEX		0x0FFF
@@ -980,6 +1004,9 @@ struct	iw_range
 	__u16		old_num_channels;
 	__u8		old_num_frequency;
 
+	/* Scan capabilities */
+	__u8		scan_capa;	/* IW_SCAN_CAPA_* bit field */
+
 	/* Wireless event capability bitmasks */
 	__u32		event_capa[6];
 
@@ -1116,5 +1143,16 @@ struct iw_event
 			  (char *) NULL)
 #define IW_EV_POINT_LEN	(IW_EV_LCP_LEN + sizeof(struct iw_point) - \
 			 IW_EV_POINT_OFF)
+
+/* Size of the Event prefix when packed in stream */
+#define IW_EV_LCP_PK_LEN	(4)
+/* Size of the various events when packed in stream */
+#define IW_EV_CHAR_PK_LEN	(IW_EV_LCP_PK_LEN + IFNAMSIZ)
+#define IW_EV_UINT_PK_LEN	(IW_EV_LCP_PK_LEN + sizeof(__u32))
+#define IW_EV_FREQ_PK_LEN	(IW_EV_LCP_PK_LEN + sizeof(struct iw_freq))
+#define IW_EV_PARAM_PK_LEN	(IW_EV_LCP_PK_LEN + sizeof(struct iw_param))
+#define IW_EV_ADDR_PK_LEN	(IW_EV_LCP_PK_LEN + sizeof(struct sockaddr))
+#define IW_EV_QUAL_PK_LEN	(IW_EV_LCP_PK_LEN + sizeof(struct iw_quality))
+#define IW_EV_POINT_PK_LEN	(IW_EV_LCP_PK_LEN + 4)
 
 #endif	/* _LINUX_WIRELESS_H */
